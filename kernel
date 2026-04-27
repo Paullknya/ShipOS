@@ -1,0 +1,219 @@
+; ============================================================
+; kernel.asm – ядро shipOS (горячие клавиши)
+; Размер: 4096 байт (8 секторов)
+; ============================================================
+[bits 16]
+[org 0x0000]
+
+; ------------------------------------------------------------
+;  Данные
+; ------------------------------------------------------------
+msg_prompt:   db "shipOS> ", 0
+msg_he:       db "HE - Hello from shipOS!", 0
+msg_ex:       db "EX - 231 hello", 0
+msg_ver:      db "VER - shipOS version 1.1", 0
+msg_tu:       db "TU - hello from designer", 0
+msg_info:     db "INFO - Available: HE, TU, EX, VER, CLS, REBOOT, MEM", 0
+msg_mem:      db "MEM - Used: 16 KB (kernel) + 4 KB stack", 0
+msg_ctrl_h:   db "/\   /\", 0
+ctrl_pressed: db 0
+
+; ------------------------------------------------------------
+;  Начало ядра
+; ------------------------------------------------------------
+start:
+    mov ax, 0x1000
+    mov ds, ax
+    mov ax, 0xB800
+    mov es, ax
+
+    ; очистка экрана
+    mov cx, 2000
+    mov ax, 0x0720
+    xor di, di
+    rep stosw
+
+    ; приглашение
+    mov di, 0
+    mov si, msg_prompt
+    call print_string
+
+    ; установка обработчика клавиатуры (вектор 9)
+    cli
+    xor ax, ax
+    mov es, ax
+    mov word [es:9*4], keyboard_handler
+    mov word [es:9*4+2], cs
+    sti
+
+main_loop:
+    hlt
+    jmp main_loop
+
+; ------------------------------------------------------------
+;  Обработчик клавиатуры (горячие клавиши + Ctrl+H)
+; ------------------------------------------------------------
+keyboard_handler:
+    pusha
+    push ds
+    push es
+
+    mov ax, 0x1000
+    mov ds, ax
+    mov ax, 0xB800
+    mov es, ax
+
+    in al, 0x60
+    cmp al, 0x80          ; отпускание?
+    jae .done
+
+    ; --- отслеживание Ctrl ---
+    cmp al, 0x1D          ; нажатие Ctrl
+    je .ctrl_down
+    cmp al, 0x9D          ; отпускание Ctrl
+    je .ctrl_up
+
+    ; --- комбинация Ctrl+H ---
+    cmp byte [ctrl_pressed], 1
+    jne .check_ordinary
+    cmp al, 0x23          ; H
+    je .ctrl_h
+    jmp .done
+
+.ctrl_down:
+    mov byte [ctrl_pressed], 1
+    jmp .done
+.ctrl_up:
+    mov byte [ctrl_pressed], 0
+    jmp .done
+
+.check_ordinary:
+    ; --- обычные горячие клавиши ---
+    cmp al, 0x23          ; H
+    je .do_he
+    cmp al, 0x12          ; E
+    je .do_ex
+    cmp al, 0x2F          ; V
+    je .do_ver
+    cmp al, 0x14          ; T
+    je .do_tu
+    cmp al, 0x17          ; I
+    je .do_info
+    cmp al, 0x2E          ; C (CLS)
+    je .do_cls
+    cmp al, 0x13          ; R (REBOOT)
+    je .do_reboot
+    cmp al, 0x32          ; M (MEM)
+    je .do_mem
+    jmp .done
+
+.ctrl_h:
+    mov di, 1120          ; строка 7
+    mov si, msg_ctrl_h
+    call print_string
+    jmp .done
+
+.do_he:
+    mov di, 160           ; строка 1
+    mov si, msg_he
+    call print_string
+    jmp .done
+.do_ex:
+    mov di, 320           ; строка 2
+    mov si, msg_ex
+    call print_string
+    jmp .done
+.do_ver:
+    mov di, 480           ; строка 3
+    mov si, msg_ver
+    call print_string
+    jmp .done
+.do_tu:
+    mov di, 640           ; строка 4
+    mov si, msg_tu
+    call print_string
+    jmp .done
+.do_info:
+    mov di, 800           ; строка 5
+    mov si, msg_info
+    call print_string
+    jmp .done
+.do_cls:
+    call clear_screen
+    mov di, 0
+    mov si, msg_prompt
+    call print_string
+    jmp .done
+.do_reboot:
+    mov ax, 0
+    mov es, ax
+    mov word [es:0x0472], 0x1234
+    jmp 0xFFFF:0x0000
+.do_mem:
+    mov di, 960           ; строка 6
+    mov si, msg_mem
+    call print_string
+
+.done:
+    mov al, 0x20
+    out 0x20, al
+    pop es
+    pop ds
+    popa
+    iret
+
+; ------------------------------------------------------------
+;  Вспомогательные функции
+; ------------------------------------------------------------
+clear_screen:
+    push es
+    mov ax, 0xB800
+    mov es, ax
+    xor di, di
+    mov cx, 2000
+    mov ax, 0x0720
+    rep stosw
+    pop es
+    ret
+
+print_string:
+    push ax
+    push di
+    push si
+.loop:
+    lodsb
+    or al, al
+    jz .done
+    mov ah, 0x02
+    stosw
+    jmp .loop
+.done:
+    pop si
+    pop di
+    pop ax
+    ret
+
+print_char:
+    push ax
+    push bx
+    push cx
+    push dx
+    mov ah, 0x0E
+    int 0x10
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+
+newline:
+    mov al, 0x0D
+    call print_char
+    mov al, 0x0A
+    call print_char
+    ret
+
+; ------------------------------------------------------------
+;  Заполнение до 4096 байт (8 секторов)
+; ------------------------------------------------------------
+times 512*8 - ($-$$) db 0
